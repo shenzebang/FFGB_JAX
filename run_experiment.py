@@ -30,11 +30,14 @@ num_clients = 100
 s = .1
 num_classes = 10
 num_channels = 3
-oracle_num_steps = 10000
-oracle_lr = 1e-3
+oracle_num_steps = 30000
+oracle_lr = 1e-4
 oracle_batch_size = 32
+distill_oracle_num_steps = 30000
+distill_oracle_lr = 1e-4
+distill_oracle_batch_size = 32
 num_sampled_clients = 10
-dataset = "mnist"
+dataset = "cifar10"
 model = CONVNET()
 get_classifier_fn = jax.partial(get_classifier_fn, model, num_classes)
 model_apply_fn = jax.jit(model.apply)
@@ -43,7 +46,9 @@ hyperparams = ServerHyperParams(num_rounds=num_rounds, distill_ratio=distill_rat
                                 num_local_steps=num_local_steps, num_clients=num_clients, s=s,
                                 num_classes=num_classes, oracle_num_steps=oracle_num_steps, oracle_lr=oracle_lr,
                                 oracle_batch_size=oracle_batch_size, num_channels=num_channels,
-                                get_classifier_fn=get_classifier_fn)
+                                get_classifier_fn=get_classifier_fn,
+                                distill_oracle_batch_size=distill_oracle_batch_size,
+                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps)
 
 static_fns = StaticFns(get_classifier_fn=get_classifier_fn, model_apply_fn=model_apply_fn)
 
@@ -52,29 +57,24 @@ ffgb = get_optimizer(model, hyperparams)
 
 # ================= load dataset =================
 # load dataset with PyTorch
+print("loading dataset "+dataset)
 if dataset == "cifar10":
-    transform = transforms.Compose(
-        [transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     dataset = {
-        "train": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=True, transform=transform, download=True),
-        "test": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=False, transform=transform, download=True)
+        "train": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=True, download=True),
+        "test": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=False, download=True)
     }
-    x = jnp.array(dataset["train"].data)
+    x = jnp.array(dataset["train"].data)/255.
     y = jnp.array(dataset["train"].targets)
-    x_test = jnp.array(dataset["test"].data)
+    x_test = jnp.array(dataset["test"].data)/255.
     y_test = jnp.array(dataset["test"].targets)
 elif dataset == "mnist":
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
     dataset = {
-        "train": MNIST(os.path.join(DATA_DIR, "mnist"), train=True, transform=transform, download=True),
-        "test": MNIST(os.path.join(DATA_DIR, "mnist"), train=False, transform=transform, download=True)
+        "train": MNIST(os.path.join(DATA_DIR, "mnist"), train=True, download=True),
+        "test": MNIST(os.path.join(DATA_DIR, "mnist"), train=False, download=True)
     }
-    x = jnp.array(dataset["train"].data.numpy())[:, None, :, :].transpose(0, 2, 3, 1)
+    x = jnp.array(dataset["train"].data.numpy())[:, :, :, None]/255.
     y = jnp.array(dataset["train"].targets.numpy())
-    x_test = jnp.array(dataset["test"].data.numpy())[:, None, :, :].transpose(0, 2, 3, 1)
+    x_test = jnp.array(dataset["test"].data.numpy())[:, :, :, None]/255.
     y_test = jnp.array(dataset["test"].targets.numpy())
 
 # ================= load dataset =================
@@ -83,20 +83,26 @@ elif dataset == "mnist":
 # ================= prepare dataset =================
 
 key, subkey = random.split(key)
-index = random.permutation(subkey, jnp.arange(0, x.shape[0]))
-x = x[index]
-y = y[index]
+x = random.permutation(subkey, x)
+y = random.permutation(subkey, y)
+# index = random.permutation(subkey, jnp.arange(0, x.shape[0]))
+# x = x[index]
+# y = y[index]
 
-x_train, x_distill = jnp.split(x, [int(x.shape[0] * hyperparams.distill_ratio)], axis=0)
-y_train = y[0:int(x.shape[0] * hyperparams.distill_ratio)]
+
+# x_train, x_distill = jnp.split(x, [int(x.shape[0] * (1.-hyperparams.distill_ratio))], axis=0)
+# y_train = y[0:int(x.shape[0] * (1.-hyperparams.distill_ratio))]
+
+
+x_train = x
+y_train = y
+x_distill = x[0:int(x.shape[0] * hyperparams.distill_ratio)]
 
 data_train = Batch(x_train, y_train)
 data_distill = Batch(x_distill, None)
 
 
 data_test = Batch(x_test, y_test)
-
-del x, y, index
 # ================= prepare dataset =================
 
 

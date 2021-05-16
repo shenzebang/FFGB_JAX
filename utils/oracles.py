@@ -28,7 +28,16 @@ def train_op(net: Module, opt: Optimizer, x, y, key, hyperparams: ServerHyperPar
 train_op = jit(train_op, static_argnums=(0, 5))
 
 
-def regression_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
+def train_op_5(net: Module, opt: Optimizer, x, y, key, hyperparams: ServerHyperParams):
+    for _ in range(5):
+        v, opt, key = train_op(net, opt, x, y, key, hyperparams)
+    return v, opt, key
+
+
+train_op_5 = jit(train_op_5, static_argnums=(0, 5))
+
+
+def _regression_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
     key, subkey = random.split(key)
     params_init = net.init(subkey, x[0:2])
     opt_def = Adam(learning_rate=hyperparams.oracle_lr)
@@ -40,4 +49,29 @@ def regression_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
 
     return opt.target
 
+
 # regression_oracle = jit(regression_oracle, static_argnums=(0, 4))
+
+def regression_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
+    key, subkey = random.split(key)
+    params_init = net.init(subkey, x[0:2])
+    opt_def = Adam(learning_rate=hyperparams.oracle_lr)
+    opt = opt_def.create(target=params_init)
+    for step in range(hyperparams.oracle_num_steps // 5):
+        v, opt, key = train_op_5(net, opt, x, y, key, hyperparams)
+        # if step % 500 == 0:
+        #     print("step %5d oracle error %.2f" % (step, v))
+
+    return opt.target
+
+def distill_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
+    key, subkey = random.split(key)
+    params_init = net.init(subkey, x[0:2])
+    opt_def = Adam(learning_rate=hyperparams.distill_oracle_lr)
+    opt = opt_def.create(target=params_init)
+    for step in range(hyperparams.distill_oracle_num_steps // 5):
+        v, opt, key = train_op_5(net, opt, x, y, key, hyperparams)
+        if step % 500 == 0:
+            print("step %5d oracle error %.2f" % (step, v))
+
+    return opt.target

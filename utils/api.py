@@ -16,7 +16,8 @@ OracleState = namedtuple("OracleState", "lr num_steps batch_size")
 ServerHyperParams = namedtuple("ExperimentOptions", "num_rounds distill_ratio lr_0 num_sampled_clients\
                                                     num_distill_rounds num_local_steps num_clients s num_classes\
                                                     oracle_num_steps, oracle_lr, oracle_batch_size\
-                                                    num_channels, get_classifier_fn")
+                                                    num_channels, get_classifier_fn\
+                                                    distill_oracle_num_steps, distill_oracle_lr, distill_oracle_batch_size")
 
 ServerState = namedtuple("ServerState", "params, round")
 
@@ -25,4 +26,4 @@ FFGBDistillClientState = namedtuple("FFGBDistillClientState",
 
 FFGBDistillServerState = namedtuple("FFGBDistillServerState", "global_round")
 
-StaticFns = namedtuple("StaticFns", ['get_classifier_fn', 'net_apply_fn'])
+StaticFns = namedtuple("StaticFns", ['get_classifier_fn', 'model_apply_fn'])
