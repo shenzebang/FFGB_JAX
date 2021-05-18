@@ -87,8 +87,10 @@ del x, y, index
 # ================= initialization =================
 model = CONVNET()
 # model = MLP()
-key, subkey = random.split(key)
-params = model.init(subkey, x_train[0:2])
+keys = random.split(key, 10)
+
+
+params = jax.vmap(model.init, in_axes=[0, None])(keys, x_train[0:2])
 
 
 def loss(params, x, y):
@@ -97,11 +99,14 @@ def loss(params, x, y):
 
 value_and_grad = jax.value_and_grad(loss)
 opt_def = Adam(learning_rate=hyperparams.oracle_lr)
-opt = opt_def.create(target=params)
+opts = jax.vmap(opt_def.create)(params)
 
 def train_op(opt, x, y):
     v, g = value_and_grad(opt.target, x, y)
     return v, opt.apply_gradient(g)
+
+train_op = jax.vmap(train_op, in_axes=[0, None, None])
+
 
 train_op = jax.jit(train_op)
 for step in range(40000):
@@ -112,14 +117,14 @@ for step in range(40000):
         minval=0,
         maxval=x_train.shape[0]
     )
-    v, opt = train_op(opt, x_train[index], y_train[index])
-    if step % 500 == 0:
-        print("test sgd result")
-        f_x_test = model.apply(opt.target, x_test)
-        test_loss = v_ce(f_x_test, y_test)
-        pred = jnp.argmax(f_x_test, axis=1)
-        corrct = jnp.true_divide(
-            jnp.sum(jnp.equal(pred, jnp.reshape(y_test, pred.shape))),
-            y_test.shape[0])
-        print("step %5d, test accuracy % .4f" % (step, corrct))
+    v, opts = train_op(opts, x_train[index], y_train[index])
+    # if step % 500 == 0:
+    #     print("test sgd result")
+    #     f_x_test = model.apply(opt.target, x_test)
+    #     test_loss = v_ce(f_x_test, y_test)
+    #     pred = jnp.argmax(f_x_test, axis=1)
+    #     corrct = jnp.true_divide(
+    #         jnp.sum(jnp.equal(pred, jnp.reshape(y_test, pred.shape))),
+    #         y_test.shape[0])
+    #     print("step %5d, test accuracy % .4f" % (step, corrct))
 
