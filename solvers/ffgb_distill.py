@@ -82,14 +82,20 @@ def vclient_step(model, hyperparams: ServerHyperParams, batches: Batch, client_s
 
 # def client_end(self):
 
+predict_fn = lambda classifier_fn, xs: jnp.concatenate([classifier_fn(_x) for _x in xs])
+# predict_fn = jax.jit(predict_fn, static_argnums=(0,))
+
+
+
 def server_step(model, hyperparams: ServerHyperParams,
                 classifier: Classifier, batch_distill: Batch, server_state: FFGBDistillServerState, key):
     for distill_step in range(hyperparams.num_distill_rounds):
         classifier_fn = hyperparams.get_classifier_fn(classifier)
-        num_split = 10
+        num_split = 200
         distill_xs = jnp.split(batch_distill.x, num_split, axis=0)
-        target = [classifier_fn(x) for x in distill_xs]
-        target = jnp.concatenate(target, axis=0)
+        # target = [classifier_fn(x) for x in distill_xs]
+        # target = jnp.concatenate(target, axis=0)
+        target = predict_fn(classifier_fn, distill_xs)
         key, subkey = jax.random.split(key)
         opt = regression_oracle(model, batch_distill, target, subkey, hyperparams)
         params = jax.tree_map(lambda p_1: jnp.expand_dims(p_1, axis=0), opt.target)

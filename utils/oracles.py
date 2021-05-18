@@ -2,9 +2,10 @@ from flax.linen import Module
 from jax import value_and_grad, jit, vmap
 from jax import random
 import jax.numpy as jnp
-from flax.optim import Adam, Optimizer
+from flax.optim import Adam, Optimizer, Momentum
 from utils.api import ServerHyperParams, Batch
 import jax
+from utils.loss import v_dce
 
 
 def regression_loss(net: Module, params, x, y):
@@ -50,7 +51,6 @@ def _regression_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
     return opt.target
 
 
-
 def regression_oracle(net: Module, x, target, key, hyperparams: ServerHyperParams):
     x_init = jnp.zeros((1, hyperparams.image_size, hyperparams.image_size, hyperparams.num_channels))
     key, subkey = random.split(key)
@@ -88,9 +88,9 @@ def _train_op_n(net: Module, opt, batch, target, key, hyperparams: ServerHyperPa
 
 j_train_op_n = jit(_train_op_n, static_argnums=(0, 5, 6))
 
-
 v_train_op_n = vmap(_train_op_n, in_axes=[None, 0, 0, 0, 0, None, None])
 jv_train_op_n = jit(v_train_op_n, static_argnums=(0, 5, 6))
+
 
 def v_regression_oracle(net: Module, batches: Batch, targets, key, hyperparams: ServerHyperParams):
     x_init = jnp.zeros((1, hyperparams.image_size, hyperparams.image_size, hyperparams.num_channels))
@@ -114,15 +114,46 @@ def v_regression_oracle(net: Module, batches: Batch, targets, key, hyperparams: 
     return opts
 
 
-def distill_oracle(net: Module, x, y, key, hyperparams: ServerHyperParams):
+def kl_divergence(net: Module, params, x, target):
+    return jnp.mean(v_dce(net.apply(params, x), jax.nn.softmax(target)))
+
+
+dvg = value_and_grad(kl_divergence, argnums=1)
+
+
+def d_train_op(net: Module, opt: Optimizer, batch, target, key, hyperparams: ServerHyperParams):
+    index = random.randint(
+        key,
+        shape=(hyperparams.oracle_batch_size,),
+        minval=0,
+        maxval=batch.x.shape[0]
+    )
+    v, g = dvg(net, opt.target, batch.x[index], target[index])
+    return v, opt.apply_gradient(g)
+
+
+def d_train_op_n(net: Module, opt, batch, target, keys, hyperparams: ServerHyperParams, n: int):
+    for i in range(n):
+        v, opt = d_train_op(net, opt, batch, target, keys[i], hyperparams)
+    return v, opt
+
+
+jd_train_op_n = jit(d_train_op_n, static_argnums=(0, 5, 6))
+
+
+def distill_oracle(net: Module, batch: Batch, target, key, hyperparams: ServerHyperParams):
+    x_init = jnp.zeros((1, hyperparams.image_size, hyperparams.image_size, hyperparams.num_channels))
     key, subkey = random.split(key)
-    params_init = net.init(subkey, x[0:2])
+    params_init = net.init(subkey, x_init)
     opt_def = Adam(learning_rate=hyperparams.distill_oracle_lr)
     opt = opt_def.create(target=params_init)
     n_loop_unrolling = 5
     for step in range(hyperparams.distill_oracle_num_steps // n_loop_unrolling):
-        v, opt, key = train_op_n(net, opt, x, y, key, hyperparams, n_loop_unrolling)
-        if step % 500 == 0:
-            print("step %5d oracle error %.2f" % (step, v))
+        keys = random.split(key, n_loop_unrolling + 1)
+        key = keys[n_loop_unrolling]
+        keys = keys[: n_loop_unrolling]
+        v, opt = jd_train_op_n(net, opt, batch, target, keys, hyperparams, n_loop_unrolling)
+        # if step % 500 == 0:
+        #     print("step %5d oracle error %.2f" % (step, v))
 
-    return opt.target
+    return opt

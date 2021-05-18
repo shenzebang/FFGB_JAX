@@ -18,23 +18,21 @@ DATA_DIR = os.path.join(os.environ['HOME'], 'DATASET')
 model_path = './ckpt'
 if not os.path.exists(model_path): os.makedirs(model_path)
 
-
-
 # ================= configuration =================
 num_rounds = 100
-distill_ratio = .1
+distill_ratio = 1
 lr_0 = 1
 num_distill_rounds = 1
-num_local_steps = 5
+num_local_steps = 2
 num_clients = 100
 s = .1
 num_classes = 10
 num_channels = 3
-image_size =32
-oracle_num_steps = 30000
+image_size = 32
+oracle_num_steps = 40000
 oracle_lr = 1e-4
 oracle_batch_size = 32
-distill_oracle_num_steps = 30000
+distill_oracle_num_steps = 40000
 distill_oracle_lr = 1e-4
 distill_oracle_batch_size = 32
 num_sampled_clients = 10
@@ -59,24 +57,24 @@ ffgb = get_optimizer(model, hyperparams)
 
 # ================= load dataset =================
 # load dataset with PyTorch
-print("loading dataset "+dataset)
+print("loading dataset " + dataset)
 if dataset == "cifar10":
     dataset = {
         "train": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=True, download=True),
         "test": CIFAR10(os.path.join(DATA_DIR, "cifar10"), train=False, download=True)
     }
-    x = jnp.array(dataset["train"].data)/255.
+    x = (jnp.array(dataset["train"].data) / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
     y = jnp.array(dataset["train"].targets)
-    x_test = jnp.array(dataset["test"].data)/255.
+    x_test = (jnp.array(dataset["test"].data) / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
     y_test = jnp.array(dataset["test"].targets)
 elif dataset == "mnist":
     dataset = {
         "train": MNIST(os.path.join(DATA_DIR, "mnist"), train=True, download=True),
         "test": MNIST(os.path.join(DATA_DIR, "mnist"), train=False, download=True)
     }
-    x = jnp.array(dataset["train"].data.numpy())[:, :, :, None]/255.
+    x = jnp.array(dataset["train"].data.numpy())[:, :, :, None] / 255.
     y = jnp.array(dataset["train"].targets.numpy())
-    x_test = jnp.array(dataset["test"].data.numpy())[:, :, :, None]/255.
+    x_test = jnp.array(dataset["test"].data.numpy())[:, :, :, None] / 255.
     y_test = jnp.array(dataset["test"].targets.numpy())
 
 # ================= load dataset =================
@@ -102,7 +100,6 @@ x_distill = x[0:int(x.shape[0] * hyperparams.distill_ratio)]
 
 data_train = Batch(x_train, y_train)
 data_distill = Batch(x_distill, None)
-
 
 data_test = Batch(x_test, y_test)
 # ================= prepare dataset =================

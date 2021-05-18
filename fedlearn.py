@@ -42,7 +42,7 @@ def run_one_round(
         new_opts, new_weights, client_state = fedalg.vclient_step(sampled_dss, client_states, subkey)
 
         opts_list.append(new_opts)
-        weights_list.append(new_weights)
+        weights_list.append(new_weights/hyperparams.num_sampled_clients)
 
 
     params = server_state.classifier.params
@@ -88,11 +88,12 @@ def functional_federated_learning(
         key = keys[global_round]
         server_state = run_one_round(server_state, fedalg, data_train_tuple,
                                                         data_distill, key, hyperparams, static_fns)
-        global_round += 1
+
 
         # compute test metrics.
         print("evaluating testing accuracy")
         correct = test_fn(hyperparams, server_state.classifier, data_test)
         print("Round %2d, testing accuracy %.3f" % (global_round, correct))
 
+        global_round += 1
         # todo: log test metrics

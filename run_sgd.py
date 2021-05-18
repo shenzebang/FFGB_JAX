@@ -5,7 +5,7 @@ import jax.random as random
 import os
 import jax
 from utils.api import ServerHyperParams, Classifier
-from flax.optim import Adam
+from flax.optim import Adam, Momentum
 from utils.loss import v_ce
 from models.convnet import CONVNET
 from models.mlp import MLP
@@ -31,11 +31,11 @@ x_test = jnp.array(dataset["test"].data)
 y_test = jnp.array(dataset["test"].targets)
 
 # normalize the data
-# x = (x / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
-# x_test = (x_test / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
+x = (x / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
+x_test = (x_test / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
 
-x = x/255.
-x_test = x_test/255.
+# x = x/255.
+# x_test = x_test/255.
 # ================= configuration =================
 num_rounds = 100
 distill_ratio = .1
@@ -53,6 +53,7 @@ distill_oracle_num_steps = 40000
 distill_oracle_lr = 1e-3
 distill_oracle_batch_size = 32
 num_sampled_clients = 10
+image_size =32
 dataset = "cifar10"
 model = CONVNET()
 get_classifier_fn = jax.partial(get_classifier_fn, model, num_classes)
@@ -64,7 +65,8 @@ hyperparams = ServerHyperParams(num_rounds=num_rounds, distill_ratio=distill_rat
                                 oracle_batch_size=oracle_batch_size, num_channels=num_channels,
                                 get_classifier_fn=get_classifier_fn,
                                 distill_oracle_batch_size=distill_oracle_batch_size,
-                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps)
+                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps,
+                                image_size=image_size)
 
 # static_fns = StaticFns(get_classifier_fn=get_classifier_fn, model_apply_fn=model_apply_fn)
 
@@ -82,15 +84,15 @@ y = y[index]
 # y_train = y[0:int(x.shape[0] * hyperparams.distill_ratio)]
 x_train = x
 y_train = y
-del x, y, index
+# del x, y, index
 
 # ================= initialization =================
 model = CONVNET()
 # model = MLP()
-keys = random.split(key, 10)
+key, subkey = random.split(key)
 
 
-params = jax.vmap(model.init, in_axes=[0, None])(keys, x_train[0:2])
+params = model.init(subkey, x_train[0:2])
 
 
 def loss(params, x, y):
@@ -98,33 +100,35 @@ def loss(params, x, y):
     return jnp.mean(v_ce(f_x, y))
 
 value_and_grad = jax.value_and_grad(loss)
-opt_def = Adam(learning_rate=hyperparams.oracle_lr)
-opts = jax.vmap(opt_def.create)(params)
+# opt_def = Adam(learning_rate=hyperparams.oracle_lr)
+opt_def = Momentum(learning_rate=hyperparams.oracle_lr)
+
+
+opt = opt_def.create(params)
 
 def train_op(opt, x, y):
     v, g = value_and_grad(opt.target, x, y)
     return v, opt.apply_gradient(g)
 
-train_op = jax.vmap(train_op, in_axes=[0, None, None])
-
 
 train_op = jax.jit(train_op)
-for step in range(40000):
+batch_size = hyperparams.oracle_batch_size
+for epoch in range(4000):
     key, subkey = random.split(key)
-    index = random.randint(
-        subkey,
-        shape=(hyperparams.oracle_batch_size,),
-        minval=0,
-        maxval=x_train.shape[0]
-    )
-    v, opts = train_op(opts, x_train[index], y_train[index])
-    # if step % 500 == 0:
-    #     print("test sgd result")
-    #     f_x_test = model.apply(opt.target, x_test)
-    #     test_loss = v_ce(f_x_test, y_test)
-    #     pred = jnp.argmax(f_x_test, axis=1)
-    #     corrct = jnp.true_divide(
-    #         jnp.sum(jnp.equal(pred, jnp.reshape(y_test, pred.shape))),
-    #         y_test.shape[0])
-    #     print("step %5d, test accuracy % .4f" % (step, corrct))
+    x_train = random.permutation(subkey, x_train)
+    y_train = random.permutation(subkey, y_train)
+    index = 0
+    while index + batch_size < x_train.shape[0]:
+        v, opt = train_op(opt, x_train[index: index+batch_size],
+                          y_train[index: index+batch_size])
+        index = index + batch_size
+
+    print("test sgd result")
+    f_x_test = model.apply(opt.target, x_test)
+    test_loss = v_ce(f_x_test, y_test)
+    pred = jnp.argmax(f_x_test, axis=1)
+    corrct = jnp.true_divide(
+        jnp.sum(jnp.equal(pred, jnp.reshape(y_test, pred.shape))),
+        y_test.shape[0])
+    print("epoch %5d, test accuracy % .4f" % (epoch, corrct))
 
