@@ -1,9 +1,12 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 import jax
 import jax.numpy as jnp
 import torchvision.transforms as transforms
 from torchvision.datasets import MNIST, CIFAR10
 import jax.random as random
-import os
+
 
 from models.convnet import CONVNET
 from models.mlp import MLP
@@ -22,14 +25,15 @@ if not os.path.exists(model_path): os.makedirs(model_path)
 
 # ================= configuration =================
 num_rounds = 100
-distill_ratio = .1
+distill_ratio = .2
 lr_0 = 1
 num_distill_rounds = 1
 num_local_steps = 5
 num_clients = 100
-s = .1
+s = 1
 num_classes = 10
 num_channels = 3
+image_size = 32
 oracle_num_steps = 30000
 oracle_lr = 1e-4
 oracle_batch_size = 32
@@ -39,7 +43,7 @@ distill_oracle_batch_size = 32
 num_sampled_clients = 10
 dataset = "cifar10"
 model = CONVNET()
-get_classifier_fn = jax.partial(get_classifier_fn, model, num_classes)
+get_classifier_fn = jax.partial(get_classifier_fn, model)
 model_apply_fn = jax.jit(model.apply)
 hyperparams = ServerHyperParams(num_rounds=num_rounds, distill_ratio=distill_ratio, lr_0=lr_0,
                                 num_sampled_clients=num_sampled_clients, num_distill_rounds=num_distill_rounds,
@@ -48,7 +52,8 @@ hyperparams = ServerHyperParams(num_rounds=num_rounds, distill_ratio=distill_rat
                                 oracle_batch_size=oracle_batch_size, num_channels=num_channels,
                                 get_classifier_fn=get_classifier_fn,
                                 distill_oracle_batch_size=distill_oracle_batch_size,
-                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps)
+                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps,
+                                image_size=image_size)
 
 static_fns = StaticFns(get_classifier_fn=get_classifier_fn, model_apply_fn=model_apply_fn)
 

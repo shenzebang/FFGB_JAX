@@ -1,11 +1,10 @@
-from utils.api import Classifier, Batch, ServerHyperParams
-from utils.classifier import get_classifier_fn
+from utils.api import Classifier, Batch, ServerHyperParams, FFGBDistillServerState
 import jax.numpy as jnp
 from jax import jit
 
 
-def _test_fn(hyperparams: ServerHyperParams, classifier: Classifier, batch: Batch):
-    classifier_fn = hyperparams.get_classifier_fn(classifier)
+def _test_fn(hyperparams: ServerHyperParams, server_state: FFGBDistillServerState, batch: Batch):
+    classifier_fn = hyperparams.get_classifier_fn(server_state.classifier)
     f_x_test = classifier_fn(batch.x)
     pred = jnp.argmax(f_x_test, axis=1)
     correct = jnp.true_divide(

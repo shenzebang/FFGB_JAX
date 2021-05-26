@@ -1,18 +1,17 @@
-from utils.api import ServerHyperParams, Batch, FedAlgorithm, ServerState, Classifier, StaticFns
+from utils.api import ServerHyperParams, Batch, FedAlgorithm, Classifier, StaticFns, FFGBDistillServerState
 import jax
 from utils.test import test_fn
 from typing import List
 from utils.data_split import data_split
 import jax.numpy as jnp
-
+from tqdm import trange, tqdm
 
 # one round of functional federated learning.
 def run_one_round(
-        server_classifier: Classifier,
         fedalg: FedAlgorithm,
         data_train_tuple: List[Batch],
         data_distill: Batch,
-        server_state: ServerState,
+        server_state: FFGBDistillServerState,
         key: jax.random.PRNGKey,
         hyperparams: ServerHyperParams,
         static_fns: StaticFns
@@ -22,32 +21,27 @@ def run_one_round(
     key, subkey = jax.random.split(key)
 
     client_indxs = fedalg.sampler(hyperparams.num_clients, hyperparams.num_sampled_clients, subkey)
-    print("sampled clients: {}".format(client_indxs))
+    sampled_x = jnp.stack([data_train_tuple[client_indx].x for client_indx in list(client_indxs)], axis=0)
+    sampled_y = jnp.stack([data_train_tuple[client_indx].y for client_indx in list(client_indxs)], axis=0)
+    sampled_dss = Batch(x=sampled_x, y=sampled_y)
 
-    print("making datasets for sampled clients.")
-    sampled_dss = [data_train_tuple[client_indx] for client_indx in list(client_indxs)]
-
-    clients_state = [fedalg.client_init(server_classifier, train_batch, server_state)
-                     for train_batch in sampled_dss]
+    # clients_state = [fedalg.client_init(train_batch, server_state)
+    #                  for train_batch in sampled_dss]
+    client_states = jax.vmap(fedalg.client_init, in_axes=[0, None])(sampled_dss, server_state)
 
 
-    params_list = server_classifier.params_list
-    weight_list = server_classifier.weight_list
-    num_ensembles = server_classifier.num_ensembles
-    for client_state, batch in zip(clients_state, sampled_dss):
-        for local_step in range(hyperparams.num_local_steps):
-            print(local_step)
-            key, subkey = jax.random.split(key)
-            new_params, new_weight, client_state = fedalg.client_step(batch, client_state, subkey)
-            params_list.append(new_params)
-            weight_list.append(new_weight / hyperparams.num_sampled_clients)
-            num_ensembles += 1
+    new_classifiers = []
+    for _ in trange(hyperparams.num_local_steps, desc='local steps', leave=False):
+        key, subkey = jax.random.split(key)
+        new_params, new_weights, client_states = fedalg.client_step(sampled_dss, client_states, subkey)
+        new_classifiers.append(
+            Classifier(new_params, new_weights/hyperparams.num_sampled_clients)
+        )
 
-    server_ensemble = Classifier(params_list, weight_list, num_ensembles)
     # update server classifier and state.
-    server_classifier, server_state = fedalg.server_step(server_ensemble, data_distill, server_state, key)
+    server_state = fedalg.server_step(new_classifiers, data_distill, server_state, key)
 
-    return server_classifier, server_state
+    return server_state
 
 
 def functional_federated_learning(
@@ -67,22 +61,23 @@ def functional_federated_learning(
     # split the train dataset
     data_train_tuple = data_split(data_train, hyperparams.num_clients, hyperparams.s)
 
-    server_classifier = Classifier(params_list=[], weight_list=[], num_ensembles=0)
-    server_state = fedalg.server_init()
+    # server_classifier = Classifier(params_list=[], weight_list=[])
+    # key, subkey = jax.random.split(key)
+    server_state = fedalg.server_init(jax.random.PRNGKey(1))
 
     keys = jax.random.split(key, hyperparams.num_rounds)
-    global_round = 0
+
     print("\nStarting training. First round is slower than the rest.")
-    while global_round < hyperparams.num_rounds:
-        print("\nrunning round {}".format(global_round))
+    for global_round in trange(hyperparams.num_rounds):
+
         key = keys[global_round]
-        server_classifier, server_state = run_one_round(server_classifier, fedalg, data_train_tuple,
+        server_state = run_one_round(fedalg, data_train_tuple,
                                                         data_distill, server_state, key, hyperparams, static_fns)
-        global_round += 1
+
 
         # compute test metrics.
-        print("evaluating testing accuracy")
-        correct = test_fn(hyperparams, server_classifier, data_test)
+        # print("evaluating testing accuracy")
+        correct = test_fn(hyperparams, server_state, data_test)
         print("Round %2d, testing accuracy %.3f" % (global_round, correct))
 
         # todo: log test metrics

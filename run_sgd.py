@@ -5,12 +5,12 @@ import jax.random as random
 import os
 import jax
 from utils.api import ServerHyperParams, Classifier
-from flax.optim import Adam
+from flax.optim import Adam, Momentum
 from utils.loss import v_ce
 from models.convnet import CONVNET
 from models.mlp import MLP
 from utils.classifier import get_classifier_fn
-from utils.oracles import regression_oracle, distill_oracle
+# from utils.oracles import regression_oracle, distill_oracle
 
 key = random.PRNGKey(100)
 
@@ -34,8 +34,8 @@ y_test = jnp.array(dataset["test"].targets)
 # x = (x / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
 # x_test = (x_test / 255. - jnp.ones(3) * .5) / (jnp.ones(3) * .5)
 
-x = x/255.
-x_test = x_test/255.
+x = (x/255. - jnp.array((0.4914, 0.4822, 0.4465))) / jnp.array((0.2023, 0.1994, 0.2010))
+x_test = (x_test/255. - jnp.array((0.4914, 0.4822, 0.4465))) / jnp.array((0.2023, 0.1994, 0.2010))
 # ================= configuration =================
 num_rounds = 100
 distill_ratio = .1
@@ -45,6 +45,7 @@ num_local_steps = 3
 num_clients = 100
 s = .1
 num_classes = 10
+image_size = 32
 num_channels = 3
 oracle_num_steps = 40000
 oracle_lr = 1e-3
@@ -64,7 +65,8 @@ hyperparams = ServerHyperParams(num_rounds=num_rounds, distill_ratio=distill_rat
                                 oracle_batch_size=oracle_batch_size, num_channels=num_channels,
                                 get_classifier_fn=get_classifier_fn,
                                 distill_oracle_batch_size=distill_oracle_batch_size,
-                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps)
+                                distill_oracle_lr=distill_oracle_lr, distill_oracle_num_steps=distill_oracle_num_steps,
+                                image_size=image_size)
 
 # static_fns = StaticFns(get_classifier_fn=get_classifier_fn, model_apply_fn=model_apply_fn)
 
@@ -96,7 +98,9 @@ def loss(params, x, y):
     return jnp.mean(v_ce(f_x, y))
 
 value_and_grad = jax.value_and_grad(loss)
-opt_def = Adam(learning_rate=hyperparams.oracle_lr)
+# opt_def = Adam(learning_rate=hyperparams.oracle_lr)
+opt_def = Momentum(learning_rate=1e-3, weight_decay=1e-4, nesterov=True)
+
 opt = opt_def.create(target=params)
 
 def train_op(opt, x, y):
@@ -104,7 +108,7 @@ def train_op(opt, x, y):
     return v, opt.apply_gradient(g)
 
 train_op = jax.jit(train_op)
-for step in range(40000):
+for step in range(400000):
     key, subkey = random.split(key)
     index = random.randint(
         subkey,
