@@ -4,13 +4,11 @@ import jax.random as random
 import jax.numpy as jnp
 import jax
 from collections import namedtuple
+
 # test the regression oracle with simple modules
 
 
-State = namedtuple("State", "f_x, residual")
-
-
-
+# State = namedtuple("State", "f_x, residual")
 
 
 # def f(x):
@@ -45,8 +43,6 @@ State = namedtuple("State", "f_x, residual")
 # print(y)
 
 
-
-
 # net = nn.Dense(features=10)
 # n = 1000
 # d = 10
@@ -64,7 +60,39 @@ State = namedtuple("State", "f_x, residual")
 # params = regression_oracle(net, x, y, subkey, oracle_state)
 
 
-v = []
-av = jnp.stack(v)
-print(av)
+# v = []
+# av = jnp.stack(v)
+# print(av)
 
+# a = jnp.ones((3, 2))
+# a = [a]*4
+# print(a)
+# def foo(a):
+#     return a
+#
+# vfoo_a = jax.vmap(foo)(a)
+#
+# tfoo_a = jax.tree_map(foo, a)
+#
+# print(vfoo_a)
+# print(tfoo_a)
+
+a = jnp.ones((1, 2))
+b = jnp.ones((3, 1, 2))
+# a = [jnp.ones((1, 2)) for _ in range(3)]
+# b = a
+
+
+
+# print(a)
+
+def f(_a, _b):
+    # print(_a, "\n")
+    # print(_b, "\n")
+    return _a + _b
+
+
+vf = jax.vmap(jax.vmap(f, in_axes=(0, 0)), in_axes=(None, 0))
+print(vf(a, b))
+# tf = jax.tree_multimap(f, a, b)
+# print(tf)
